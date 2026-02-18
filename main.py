@@ -14,7 +14,7 @@ client = OpenAI()
 
 MAX_SCREENSHOTS = 3
 
-SYSTEM_PROMPT = """You are a browser automation agent. Your goal is to log into Duolingo and complete one lesson to extend the daily streak (if daily streak is already extended, complete a lesson anyway).
+LOGIN_SYSTEM_PROMPT = """You are a browser automation agent. Your goal is to log into Duolingo and start a lesson exercise.
 
 You have access to Playwright browser tools to control a Chromium browser.
 
@@ -27,10 +27,32 @@ Workflow:
 4. Click the email input field, then call type_email to enter the email
 5. Click the password input field, then call type_password to enter the password
 6. Submit the login form
-7. Navigate to a lesson and complete it by answering all questions
-8. When the lesson is fully completed, make sure you're back on the Duolingo dashboard page, then respond with DONE
+7. Navigate to a lesson and start it
+8. Once you see the first exercise/question of the lesson on screen, respond with DONE
 
-Take screenshots frequently to understand the current page state. Use them to decide what to do next."""
+After every screenshot, reason about what you see and plan your next actions by listing the exact pixel coordinates of the elements you need to interact with (e.g. "I can see the email field at (640, 300), password field at (640, 370), login button at (640, 440)"). Then execute your clicks."""
+
+EXERCISE_SYSTEM_PROMPT = """You are a browser automation agent and a native French speaker. Your goal is to solve Duolingo exercises one at a time. The user is learning French from English, so exercises will involve translating between English and French, matching words, filling in blanks, etc. Use your native-level French knowledge to answer correctly.
+
+You are currently inside an active Duolingo lesson. An exercise is shown on screen.
+
+Your task:
+1. Take a screenshot to see the current exercise.
+2. Carefully study the screenshot. Identify the exercise type and the correct answer.
+3. Plan your clicks: list the exact pixel coordinates you need to click, in order, to select/type the correct answer and submit it. Then execute those clicks one by one.
+4. After submitting, click the "Continue" button (or equivalent) to advance.
+5. Take another screenshot to confirm the exercise was completed.
+6. Once you see a NEW exercise loaded on screen, respond with DONE.
+
+IMPORTANT - Listening and speaking exercises:
+- Some exercises require you to listen to audio or speak into a microphone.
+- You CANNOT do these. Look for a button like "Can't listen now", "Can't speak now", or "Skip" and click it to skip these exercises.
+
+IMPORTANT - Lesson completion:
+- If after completing an exercise you see a lesson completion/summary screen (e.g. showing XP earned, streak info, or a "Continue" button back to the home page), you must click "Continue" or any button that takes you back to the Duolingo dashboard/home page.
+- Once you are back on the dashboard/home page, respond with LESSON_COMPLETE.
+
+Take screenshots frequently to understand the current page state."""
 
 TOOL_SCHEMAS = [
     {
@@ -223,12 +245,12 @@ def is_screenshot_message(msg):
     return False
 
 
-def trim_old_screenshots(messages):
-    """Keep only the last MAX_SCREENSHOTS screenshot messages, replace older ones with a placeholder."""
+def trim_old_screenshots(messages, keep=1):
+    """Keep only the last `keep` screenshot messages, replace older ones with a placeholder."""
     screenshot_indices = [i for i, msg in enumerate(messages) if is_screenshot_message(msg)]
-    if len(screenshot_indices) <= MAX_SCREENSHOTS:
+    if len(screenshot_indices) <= keep:
         return
-    to_remove = screenshot_indices[:-MAX_SCREENSHOTS]
+    to_remove = screenshot_indices[:-keep]
     for i in to_remove:
         messages[i] = {"role": "user", "content": "[old screenshot removed to save tokens]"}
 
@@ -239,23 +261,25 @@ async def run_tool(name, args):
     return await func(**args)
 
 
-async def main():
-    messages: list[Any] = [{"role": "system", "content": SYSTEM_PROMPT}]
-    iteration = 0
+async def run_agent(system_prompt, label, stop_signals=("DONE",), model="gpt-4.1", trim_screenshots=False):
+    """Run an LLM agent loop until it emits one of the stop signals.
 
-    print("Starting Duolingo Streak Extender agent...")
-    print("Press Ctrl+C to stop.\n")
+    Returns the stop signal that was emitted.
+    """
+    messages: list[Any] = [{"role": "system", "content": system_prompt}]
+    iteration = 0
 
     while True:
         iteration += 1
-        print(f"--- Iteration {iteration} ---")
+        print(f"  [{label}] Iteration {iteration}")
 
-        trim_old_screenshots(messages)
+        if trim_screenshots:
+            trim_old_screenshots(messages)
 
         while True:
             try:
                 response = client.responses.create(
-                    model="gpt-4.1",
+                    model=model,
                     input=messages,
                     tools=TOOL_SCHEMAS,
                     tool_choice="auto",
@@ -277,10 +301,11 @@ async def main():
             elif item.type == "message":
                 for content_block in item.content:
                     if hasattr(content_block, "text"):
-                        print(f"Agent: {content_block.text}")
-                        if "DONE" in content_block.text.upper():
-                            print("\nAgent signaled completion. Exiting.")
-                            return
+                        print(f"  [{label}]: {content_block.text}")
+                        text_upper = content_block.text.upper()
+                        for signal in stop_signals:
+                            if signal in text_upper:
+                                return signal
 
         if not tool_calls:
             continue
@@ -289,7 +314,7 @@ async def main():
         for tc in tool_calls:
             func_name = tc.name
             func_args = json.loads(tc.arguments) if tc.arguments else {}
-            print(f"  Tool: {func_name}({func_args})")
+            print(f"    Tool: {func_name}({func_args})")
 
             try:
                 result = await run_tool(func_name, func_args)
@@ -318,6 +343,37 @@ async def main():
                     "call_id": tc.call_id,
                     "output": str(result),
                 })
+
+
+async def main():
+    print("Starting Duolingo Streak Extender agent...")
+    print("Press Ctrl+C to stop.\n")
+
+    # Phase 1: Login and start the lesson
+    print("=== Phase 1: Login & Start Lesson ===")
+    await run_agent(LOGIN_SYSTEM_PROMPT, label="Login", model="gpt-4.1", trim_screenshots=True)
+    print("Login agent finished. Exercise should be on screen.\n")
+
+    # Phase 2: Solve exercises one at a time
+    exercise_num = 0
+    while True:
+        exercise_num += 1
+        print(f"=== Phase 2: Solving Exercise {exercise_num} ===")
+        signal = await run_agent(
+            EXERCISE_SYSTEM_PROMPT,
+            label=f"Exercise {exercise_num}",
+            stop_signals=("LESSON_COMPLETE", "DONE"),
+            trim_screenshots=True,
+        )
+
+        if signal == "LESSON_COMPLETE":
+            print(f"\nLesson completed after {exercise_num} exercises!")
+            break
+        else:
+            print(f"Exercise {exercise_num} solved. Starting next exercise...\n")
+
+    print("All done! Closing browser.")
+    await run_tool("close_browser", {})
 
 
 if __name__ == "__main__":
