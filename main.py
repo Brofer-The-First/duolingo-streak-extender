@@ -18,7 +18,8 @@ LOGIN_SYSTEM_PROMPT = """You are a browser automation agent. Your goal is to log
 
 You have access to Playwright browser tools to control a Chromium browser.
 
-To log in, you MUST use the `type_email` and `type_password` tools which will securely enter the credentials from the environment. Do NOT attempt to type credentials manually with type_text.
+To log in, you MUST use the `type_email` and `type_password` tools which will securely enter the credentials from the environment.
+Do NOT attempt to type credentials manually with type_text.
 
 Workflow:
 1. Open the browser
@@ -30,29 +31,26 @@ Workflow:
 7. Navigate to a lesson and start it
 8. Once you see the first exercise/question of the lesson on screen, respond with DONE
 
-After every screenshot, reason about what you see and plan your next actions by listing the exact pixel coordinates of the elements you need to interact with (e.g. "I can see the email field at (640, 300), password field at (640, 370), login button at (640, 440)"). Then execute your clicks."""
+After every screenshot, reason about what you see and plan your next actions by listing the exact pixel coordinates of the elements you need to interact with
+(e.g. "I can see the email field at (640, 300), password field at (640, 370), login button at (640, 440)"). Then execute your clicks."""
 
-EXERCISE_SYSTEM_PROMPT = """You are a browser automation agent and a native French speaker. Your goal is to solve Duolingo exercises one at a time. The user is learning French from English, so exercises will involve translating between English and French, matching words, filling in blanks, etc. Use your native-level French knowledge to answer correctly.
-
+EXERCISE_SYSTEM_PROMPT = """You are a browser automation agent and a native French and English speaker.
 You are currently inside an active Duolingo lesson. An exercise is shown on screen.
-
 Your task:
 1. Take a screenshot to see the current exercise.
 2. Carefully study the screenshot. Identify the exercise type and the correct answer.
 3. Plan your clicks: list the exact pixel coordinates you need to click, in order, to select/type the correct answer and submit it. Then execute those clicks one by one.
 4. After submitting, click the "Continue" button (or equivalent) to advance.
-5. Take another screenshot to confirm the exercise was completed.
-6. Once you see a NEW exercise loaded on screen, respond with DONE.
+5. Take another screenshot to confirm the exercise was completed, and then click continue if needed to advance to the next exercise.
+6. Take another screenshot to make sure that a NEW exercise is loaded on screen, respond with DONE.
 
 IMPORTANT - Listening and speaking exercises:
 - Some exercises require you to listen to audio or speak into a microphone.
 - You CANNOT do these. Look for a button like "Can't listen now", "Can't speak now", or "Skip" and click it to skip these exercises.
 
 IMPORTANT - Lesson completion:
-- If after completing an exercise you see a lesson completion/summary screen (e.g. showing XP earned, streak info, or a "Continue" button back to the home page), you must click "Continue" or any button that takes you back to the Duolingo dashboard/home page.
-- Once you are back on the dashboard/home page, respond with LESSON_COMPLETE.
-
-Take screenshots frequently to understand the current page state."""
+- If after completing an exercise you see a lesson completion/summary screen (e.g. showing XP earned, streak info, or a "Continue" button back to the home page), you must click "Continue" or any button that takes you back to the Duolingo dashboard/home page (take several screenshots to achieve this, if needed).
+- Once you are back on the dashboard/home page, respond with LESSON_COMPLETE."""
 
 TOOL_SCHEMAS = [
     {
